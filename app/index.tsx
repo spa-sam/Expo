@@ -11,7 +11,6 @@ const ESP32_LED_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a9";
 
 export default function Index() {
   const [isScanning, setIsScanning] = useState(false);
-  const [devices, setDevices] = useState<Device[]>([]);
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [analogValue, setAnalogValue] = useState<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -37,52 +36,60 @@ export default function Index() {
     return true;
   };
 
-  const startScan = async () => {
-    const hasPermission = await requestLocationPermission();
-    if (!hasPermission) return;
+  const handleScanButton = async () => {
+    if (isConnected) {
+      // Відключення від пристрою
+      if (connectedDevice) {
+        await connectedDevice.cancelConnection();
+      }
+      setConnectedDevice(null);
+      setIsConnected(false);
+      setAnalogValue(null);
+    } else {
+      // Сканування та підключення
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) return;
 
-    const state = await manager.state();
-    if (state !== "PoweredOn") {
-      Alert.alert(
-        "Bluetooth вимкнено",
-        "Будь ласка, увімкніть Bluetooth у налаштуваннях вашого пристрою.",
-        [{ text: "OK" }]
-      );
-      return;
-    }
+      const state = await manager.state();
+      if (state !== "PoweredOn") {
+        Alert.alert(
+          "Bluetooth вимкнено",
+          "Будь ласка, увімкніть Bluetooth у налаштуваннях вашого пристрою.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
 
-    if (!isScanning) {
       setIsScanning(true);
-      setDevices([]);
-      manager.startDeviceScan(null, null, (error, device) => {
+      manager.startDeviceScan(null, null, async (error, device) => {
         if (error) {
           console.log(error);
           setIsScanning(false);
           return;
         }
-        setDevices((prevDevices) => {
-          if (device && !prevDevices.find((d) => d.id === device.id)) {
-            return [...prevDevices, device];
+        if (device && device.name === "ESP32-C3 Analog") {
+          manager.stopDeviceScan();
+          try {
+            const connectedDevice = await device.connect();
+            setConnectedDevice(connectedDevice);
+            setIsConnected(true);
+            await connectedDevice.discoverAllServicesAndCharacteristics();
+            startStreamingData(connectedDevice);
+          } catch (error) {
+            console.log("Помилка підключення:", error);
           }
-          return prevDevices;
-        });
+          setIsScanning(false);
+        }
       });
-      setTimeout(() => {
-        manager.stopDeviceScan();
-        setIsScanning(false);
-      }, 5000);
-    }
-  };
 
-  const connectToDevice = async (device: Device) => {
-    try {
-      const connectedDevice = await device.connect();
-      setConnectedDevice(connectedDevice);
-      setIsConnected(true);
-      await connectedDevice.discoverAllServicesAndCharacteristics();
-      startStreamingData(connectedDevice);
-    } catch (error) {
-      console.log("Помилка підключення:", error);
+      // Зупинка сканування через 10 секунд, якщо пристрій не знайдено
+      setTimeout(() => {
+        if (!isConnected) {
+          manager.stopDeviceScan();
+          setIsScanning(false);
+          Alert.alert("Пристрій не знайдено", "ESP32-C3 не виявлено поблизу.");
+        }
+      }, 10000);
     }
   };
 
@@ -97,7 +104,10 @@ export default function Index() {
         }
         if (characteristic?.value) {
           const bytes = base64decode(characteristic.value);
-          const rawValue = (bytes.charCodeAt(0) << 8) | bytes.charCodeAt(1);
+          const view = new Uint16Array(
+            new Uint8Array(bytes.split("").map((c) => c.charCodeAt(0))).buffer
+          );
+          const rawValue = view[0];
           setAnalogValue(rawValue);
         }
       }
@@ -136,31 +146,18 @@ export default function Index() {
 
       <View style={styles.scanButtonContainer}>
         <Button
-          title={isScanning ? "Сканування..." : "Почати сканування"}
-          onPress={startScan}
+          title={
+            isScanning
+              ? "Сканування..."
+              : isConnected
+              ? "Відключитися"
+              : "Підключитися"
+          }
+          onPress={handleScanButton}
           disabled={isScanning}
         />
       </View>
-      {!isConnected && (
-        <View style={styles.deviceListContainer}>
-          <Text style={styles.subtitle}>Знайдені пристрої:</Text>
-          <FlatList
-            data={devices}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <View style={styles.deviceItem}>
-                <Text style={styles.deviceName}>
-                  {item.name || "Невідомий пристрій"}
-                </Text>
-                <Button
-                  title="Підключити"
-                  onPress={() => connectToDevice(item)}
-                />
-              </View>
-            )}
-          />
-        </View>
-      )}
+
       {connectedDevice && (
         <View style={styles.connectedDeviceCard}>
           <Text style={styles.connectedDeviceTitle}>Підключений пристрій:</Text>
@@ -192,7 +189,6 @@ export default function Index() {
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,

@@ -76,6 +76,15 @@ void loop() {
     uint16_t analogValue = analogRead(ANALOG_PIN);
     pCharacteristic->setValue((uint8_t*)&analogValue, 2);
     pCharacteristic->notify();
+    
+    // Вивід аналогових даних у серійний порт
+    Serial.print("Аналогове значення: ");
+    Serial.println(analogValue);
+    
     delay(200);
+  } else {
+    // Якщо пристрій не підключено, перезапускаємо рекламування
+    BLEDevice::startAdvertising();
+    delay(500);
   }
 }
