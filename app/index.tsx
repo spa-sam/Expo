@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { Text, View, Button, FlatList, Alert } from "react-native";
-import { BleManager } from "react-native-ble-plx";
+import { BleManager, Device } from "react-native-ble-plx";
 import { request, PERMISSIONS, RESULTS } from "react-native-permissions";
 
 const manager = new BleManager();
 
 export default function Index() {
   const [isScanning, setIsScanning] = useState(false);
-  const [devices, setDevices] = useState([]);
+  const [devices, setDevices] = useState<Device[]>([]);
 
   const requestLocationPermission = async () => {
     const result = await request(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION);
@@ -46,7 +46,7 @@ export default function Index() {
           return;
         }
         setDevices((prevDevices) => {
-          if (!prevDevices.find((d) => d.id === device.id)) {
+          if (device && !prevDevices.find((d) => d.id === device.id)) {
             return [...prevDevices, device];
           }
           return prevDevices;
