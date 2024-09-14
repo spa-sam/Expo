@@ -3,7 +3,9 @@ import { Text, View, Button, FlatList, Alert, StyleSheet } from "react-native";
 import { BleManager, Device } from "react-native-ble-plx";
 import { request, PERMISSIONS, RESULTS } from "react-native-permissions";
 import { decode as base64decode, encode as base64encode } from "base-64";
+import { Platform } from "react-native";
 
+const isAndroid12OrHigher = Platform.OS === "android" && Platform.Version >= 31;
 const manager = new BleManager();
 const ESP32_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const ESP32_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
@@ -23,18 +25,25 @@ export default function Index() {
     };
   }, []);
 
-  const requestLocationPermission = async () => {
-    const result = await request(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION);
-    if (result !== RESULTS.GRANTED) {
-      Alert.alert(
-        "Потрібен дозвіл",
-        "Для сканування Bluetooth пристроїв потрібен дозвіл на геолокацію",
-        [{ text: "OK" }]
+  const requestPermissions = async () => {
+    if (isAndroid12OrHigher) {
+      const bluetoothScan = await request(PERMISSIONS.ANDROID.BLUETOOTH_SCAN);
+      const bluetoothConnect = await request(
+        PERMISSIONS.ANDROID.BLUETOOTH_CONNECT
       );
-      return false;
+      return (
+        bluetoothScan === RESULTS.GRANTED &&
+        bluetoothConnect === RESULTS.GRANTED
+      );
+    } else {
+      const locationPermission = await request(
+        PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
+      );
+      return locationPermission === RESULTS.GRANTED;
     }
-    return true;
   };
+
+  let scanTimeout: NodeJS.Timeout;
 
   const handleScanButton = async () => {
     if (isConnected) {
@@ -47,7 +56,7 @@ export default function Index() {
       setAnalogValue(null);
     } else {
       // Сканування та підключення
-      const hasPermission = await requestLocationPermission();
+      const hasPermission = await requestPermissions();
       if (!hasPermission) return;
 
       const state = await manager.state();
@@ -69,6 +78,7 @@ export default function Index() {
         }
         if (device && device.name === "ESP32-C3 Analog") {
           manager.stopDeviceScan();
+          clearTimeout(scanTimeout);
           try {
             const connectedDevice = await device.connect();
             setConnectedDevice(connectedDevice);
@@ -82,14 +92,13 @@ export default function Index() {
         }
       });
 
-      // Зупинка сканування через 10 секунд, якщо пристрій не знайдено
-      setTimeout(() => {
-        if (!isConnected) {
+      scanTimeout = setTimeout(() => {
+        if (!isConnected && !connectedDevice) {
           manager.stopDeviceScan();
           setIsScanning(false);
           Alert.alert("Пристрій не знайдено", "ESP32-C3 не виявлено поблизу.");
         }
-      }, 10000);
+      }, 15000);
     }
   };
 
@@ -127,7 +136,7 @@ export default function Index() {
       await connectedDevice.writeCharacteristicWithoutResponseForService(
         ESP32_SERVICE_UUID,
         ESP32_LED_CHARACTERISTIC_UUID,
-        base64encode(String.fromCharCode.apply(null, ledStates))
+        base64encode(String.fromCharCode.apply(null, Array.from(ledStates)))
       );
 
       if (ledNumber === 12) {
